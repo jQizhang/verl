@@ -127,6 +127,7 @@ verl is fast with:
    advance/reward_loop
    advance/fully_async
    data/transfer_queue.md
+   advance/fp8.md
 
 .. toctree::
    :maxdepth: 1
