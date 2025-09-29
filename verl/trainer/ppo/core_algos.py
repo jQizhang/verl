@@ -890,7 +890,7 @@ def compute_policy_loss_vanilla(
     loss_agg_mode: str = "token-mean",
     config: Optional[DictConfig | AlgoConfig] = None,
     rollout_log_probs: torch.Tensor | None = None,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Compute the clipped policy objective and related metrics for PPO.
 
@@ -912,6 +912,17 @@ def compute_policy_loss_vanilla(
             config for the actor.
         rollout_log_probs: `(torch.Tensor)`:
             log probabilities of actions under the rollout policy, shape (batch_size, response_length).
+    
+    Returns:
+        tuple containing:
+            - pg_loss: Policy gradient loss
+            - pg_clipfrac: Fraction of clipped policy ratios
+            - ppo_kl: KL divergence between old and new policies
+            - pg_clipfrac_lower: Lower bound clipping fraction
+            - tis_imp_ratio_mean: Mean truncated importance sampling ratio (before clipping)
+            - tis_imp_ratio_max: Maximum truncated importance sampling ratio (before clipping)
+            - tis_imp_ratio_min: Minimum truncated importance sampling ratio (before clipping)
+            - tis_clipfrac: Fraction of TIS ratios that exceeded the cap and were clipped
     """
 
     assert config is not None
@@ -959,15 +970,38 @@ def compute_policy_loss_vanilla(
 
     pg_losses = torch.where(advantages < 0, clip_pg_losses2, clip_pg_losses1)
 
+    # Initialize TIS metrics with default values
+    tis_imp_ratio_mean = torch.tensor(0.0, device=pg_losses.device)
+    tis_imp_ratio_max = torch.tensor(0.0, device=pg_losses.device)
+    tis_imp_ratio_min = torch.tensor(0.0, device=pg_losses.device)
+    tis_clipfrac = torch.tensor(0.0, device=pg_losses.device)
+
     if config.tis_imp_ratio_cap > 0 and rollout_log_probs is not None:
         # Apply truncated importance sampling -> https://fengyao.notion.site/off-policy-rl
-        tis_imp_ratio = torch.exp(old_log_prob - rollout_log_probs)
-        tis_imp_ratio = torch.clamp(tis_imp_ratio, max=config.tis_imp_ratio_cap)
+        tis_imp_ratio_unclipped = torch.exp(old_log_prob - rollout_log_probs)
+        
+        # Calculate TIS metrics before clipping
+        tis_imp_ratio_mean = verl_F.masked_mean(tis_imp_ratio_unclipped, response_mask)
+        
+        # Calculate masked max and min manually
+        masked_values = torch.where(response_mask.bool(), tis_imp_ratio_unclipped, float('-inf'))
+        tis_imp_ratio_max = torch.max(masked_values.view(-1))
+        
+        masked_values_min = torch.where(response_mask.bool(), tis_imp_ratio_unclipped, float('inf'))
+        tis_imp_ratio_min = torch.min(masked_values_min.view(-1))
+        
+        # Calculate clipping fraction (percentage that exceeds the cap)
+        tis_clipfrac = verl_F.masked_mean(
+            torch.gt(tis_imp_ratio_unclipped, config.tis_imp_ratio_cap).float(), response_mask
+        )
+        
+        # Apply clipping
+        tis_imp_ratio = torch.clamp(tis_imp_ratio_unclipped, max=config.tis_imp_ratio_cap)
         pg_losses = pg_losses * tis_imp_ratio
 
     pg_loss = agg_loss(loss_mat=pg_losses, loss_mask=response_mask, loss_agg_mode=loss_agg_mode)
 
-    return pg_loss, pg_clipfrac, ppo_kl, pg_clipfrac_lower
+    return pg_loss, pg_clipfrac, ppo_kl, pg_clipfrac_lower, tis_imp_ratio_mean, tis_imp_ratio_max, tis_imp_ratio_min, tis_clipfrac
 
 
 @register_policy_loss("gspo")

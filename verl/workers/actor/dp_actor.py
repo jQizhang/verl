@@ -441,7 +441,9 @@ class DataParallelPPOActor(BasePPOActor):
                     # gpg -> verl.trainer.ppo.core_algos.compute_policy_loss_gpg
                     # clip_cov -> verl.trainer.ppo.core_algos.compute_policy_loss_clip_cov
                     policy_loss_fn = get_policy_loss_fn(loss_mode)
-                    pg_loss, pg_clipfrac, ppo_kl, pg_clipfrac_lower = policy_loss_fn(
+                    
+                    # Handle different return signatures for different loss modes
+                    policy_loss_result = policy_loss_fn(
                         old_log_prob=old_log_prob,
                         log_prob=log_prob,
                         advantages=advantages,
@@ -450,6 +452,17 @@ class DataParallelPPOActor(BasePPOActor):
                         config=self.config,
                         rollout_log_probs=rollout_log_probs,
                     )
+                    
+                    # Unpack based on the loss mode (vanilla returns 8 values, others return 4)
+                    if loss_mode == "vanilla":
+                        pg_loss, pg_clipfrac, ppo_kl, pg_clipfrac_lower, tis_imp_ratio_mean, tis_imp_ratio_max, tis_imp_ratio_min, tis_clipfrac = policy_loss_result
+                    else:
+                        pg_loss, pg_clipfrac, ppo_kl, pg_clipfrac_lower = policy_loss_result
+                        # Set default values for TIS metrics for non-vanilla modes
+                        tis_imp_ratio_mean = torch.tensor(0.0, device=pg_loss.device)
+                        tis_imp_ratio_max = torch.tensor(0.0, device=pg_loss.device)
+                        tis_imp_ratio_min = torch.tensor(0.0, device=pg_loss.device)
+                        tis_clipfrac = torch.tensor(0.0, device=pg_loss.device)
 
                     if entropy_coeff != 0:
                         entropy_loss = agg_loss(loss_mat=entropy, loss_mask=response_mask, loss_agg_mode=loss_agg_mode)
@@ -484,6 +497,10 @@ class DataParallelPPOActor(BasePPOActor):
                             "actor/pg_clipfrac": pg_clipfrac.detach().item(),
                             "actor/ppo_kl": ppo_kl.detach().item(),
                             "actor/pg_clipfrac_lower": pg_clipfrac_lower.detach().item(),
+                            "actor/tis_imp_ratio_mean": tis_imp_ratio_mean.detach().item(),
+                            "actor/tis_imp_ratio_max": tis_imp_ratio_max.detach().item(),
+                            "actor/tis_imp_ratio_min": tis_imp_ratio_min.detach().item(),
+                            "actor/tis_clipfrac": tis_clipfrac.detach().item(),
                         }
                     )
                     append_to_dict(metrics, micro_batch_metrics)
