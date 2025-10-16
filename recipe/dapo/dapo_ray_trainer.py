@@ -292,6 +292,24 @@ class RayDAPOTrainer(RayPPOTrainer):
                         old_log_prob.batch.pop("entropys")
                         batch = batch.union(old_log_prob)
 
+                        if "rollout_log_probs" in batch.batch.keys():
+                            # TODO: we may want to add diff of probs too.
+                            from verl.utils.debug.metrics import calculate_debug_metrics
+
+                            # Enable token dumping based on config
+                            dump_high_diff = self.config.trainer.get("dump_high_diff_tokens", False)
+                            dump_threshold = self.config.trainer.get("dump_high_diff_threshold_percentile", 99.0)
+                            dump_dir = self.config.trainer.get("dump_high_diff_dir", "./logprob_diff_dumps")
+                            
+                            metrics.update(calculate_debug_metrics(
+                                batch, 
+                                tokenizer=self.tokenizer,
+                                dump_high_diff=dump_high_diff,
+                                dump_threshold_percentile=dump_threshold,
+                                dump_dir=dump_dir,
+                                step=self.global_steps
+                            ))
+
                     if self.use_reference_policy:
                         # compute reference log_prob
                         with marked_timer("ref", timing_raw, "olive"):
