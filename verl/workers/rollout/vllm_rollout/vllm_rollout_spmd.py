@@ -73,7 +73,6 @@ from verl.third_party.vllm import VLLM_SLEEP_LEVEL
 from verl.utils.device import is_npu_available
 from verl.utils.distributed import initialize_global_process_group_ray
 from verl.utils.model import get_lora_rank_from_adapter
-from verl.utils.fp8_utils import apply_vllm_fp8_patches, load_quanted_weights, is_fp8_model 
 from verl.utils.profiler import GPUMemoryLogger
 from verl.utils.ray_utils import ray_noset_visible_devices
 from verl.utils.torch_functional import get_response_mask, pad_2d_list_to_length
@@ -87,7 +86,13 @@ from verl.workers.rollout.vllm_rollout.utils import (
     VLLM_LORA_PATH,
     get_vllm_max_lora_rank,
 )
-
+import vllm
+if vllm.__version__ >= "0.11.0":
+    from verl.utils.fp8_utils_vllm_11 import apply_vllm_fp8_patches, load_quanted_weights, is_fp8_model 
+    print("[lark] using fp8 utils vllm 0.11")
+else:
+    from verl.utils.fp8_utils import apply_vllm_fp8_patches, load_quanted_weights, is_fp8_model 
+    print("[lark] using fp8 utils vllm 0.10")
 logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 
