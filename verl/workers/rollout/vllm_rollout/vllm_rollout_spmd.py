@@ -642,6 +642,8 @@ class vLLMAsyncRollout(BaseRollout):
         if self.lora_config:
             lora_dtype = getattr(torch, self.config.dtype)
             self.vllm_config.lora_config = LoRAConfig(lora_dtype=lora_dtype, **self.lora_config)
+        if self.config.quantization:
+            apply_vllm_fp8_patches(block_quant=self.config.use_block_quant_rollout)
         self.inference_engine = WorkerWrapperBase(vllm_config=self.vllm_config)
         self.inference_engine.init_worker(all_kwargs)
 
