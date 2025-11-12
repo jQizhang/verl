@@ -156,6 +156,8 @@ def get_module_from_param_name(model, name: str):
     try:
         # Traverse the model hierarchy
         for part in module_path:
+            if isinstance(current_module, FusedMoE):
+                return current_module
             if isinstance(current_module, torch.nn.ModuleList):
                 current_module = current_module[int(part)]
             else:
