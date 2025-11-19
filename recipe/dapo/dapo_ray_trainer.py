@@ -144,26 +144,7 @@ class RayDAPOTrainer(RayPPOTrainer):
 
                 new_batch: DataProto = DataProto.from_single_dict(batch_dict)
                 num_gen_batches += 1
-                
-                # Identify reward model keys that should be kept for agent loop
-                reward_model_keys = set({"data_source", "reward_model", "extra_info", "uid"}) & new_batch.non_tensor_batch.keys()
-                
-                # pop those keys for generation
-                if "multi_modal_data" in new_batch.non_tensor_batch.keys():
-                    non_tensor_keys_to_pop = ["raw_prompt_ids", "multi_modal_data"]
-                else:
-                    non_tensor_keys_to_pop = ["raw_prompt_ids"]
-                
-                gen_batch = new_batch.pop(
-                    batch_keys=["input_ids", "attention_mask", "position_ids"],
-                    non_tensor_batch_keys=non_tensor_keys_to_pop,
-                )
-                
-                # For async rollout mode, agent loop needs raw_prompt and reward model keys
-                if self.async_rollout_mode:
-                    # Add back all remaining keys from new_batch (including raw_prompt, data_source, reward_model, etc.)
-                    gen_batch.non_tensor_batch.update(new_batch.non_tensor_batch)
-                
+                gen_batch = self._get_gen_batch(new_batch)
                 gen_batch_output = gen_batch.repeat(
                     repeat_times=self.config.actor_rollout_ref.rollout.n, interleave=True
                 )
@@ -173,10 +154,7 @@ class RayDAPOTrainer(RayPPOTrainer):
                 with marked_timer("step", timing_raw):
                     # generate a batch
                     with marked_timer("gen", timing_raw, "red"):
-                        if not self.async_rollout_mode:
-                            gen_batch_output = self.actor_rollout_wg.generate_sequences(gen_batch_output)
-                        else:
-                            gen_batch_output = self.async_rollout_manager.generate_sequences(gen_batch_output)
+                        gen_batch_output = self.async_rollout_manager.generate_sequences(gen_batch_output)
                         timing_raw.update(gen_batch_output.meta_info["timing"])
                         gen_batch_output.meta_info.pop("timing", None)
                     
@@ -216,10 +194,7 @@ class RayDAPOTrainer(RayPPOTrainer):
                         with marked_timer("gen_max", timing_raw, "red"):
                             gen_baseline_batch = deepcopy(gen_batch)
                             gen_baseline_batch.meta_info["do_sample"] = False
-                            if not self.async_rollout_mode:
-                                gen_baseline_output = self.actor_rollout_wg.generate_sequences(gen_baseline_batch)
-                            else:
-                                gen_baseline_output = self.async_rollout_manager.generate_sequences(gen_baseline_batch)
+                            gen_baseline_output = self.async_rollout_manager.generate_sequences(gen_baseline_batch)
 
                             new_batch = new_batch.union(gen_baseline_output)
                             # compute reward model score on new_batch
