@@ -202,10 +202,9 @@ class RolloutConfig(BaseConfig):
     limit_images: Optional[int] = None
 
     skip_tokenizer_init: bool = False
-    quantization: bool = False
 
-    use_block_quant_rollout: bool = False
-    
+    quantization: Optional[str] = None
+
     def __post_init__(self):
         """Validate the rollout config"""
         if self.expert_parallel_size > 1:

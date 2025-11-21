@@ -81,6 +81,7 @@ from verl.utils.profiler import GPUMemoryLogger
 from verl.utils.ray_utils import ray_noset_visible_devices
 from verl.utils.torch_functional import get_response_mask, pad_2d_list_to_length
 from verl.utils.vllm import TensorLoRARequest, VLLMHijack, is_version_ge
+from verl.utils.vllm.vllm_fp8_utils import apply_vllm_fp8_patches, is_fp8_model, load_quanted_weights
 from verl.workers.config import HFModelConfig, RolloutConfig
 from verl.workers.rollout.base import BaseRollout
 from verl.workers.rollout.utils import get_free_port, is_valid_ipv6_address
@@ -664,8 +665,13 @@ class vLLMAsyncRollout(BaseRollout):
         if self.lora_config:
             lora_dtype = getattr(torch, self.config.dtype)
             self.vllm_config.lora_config = LoRAConfig(lora_dtype=lora_dtype, **self.lora_config)
-        if self.config.quantization:
-            apply_vllm_fp8_patches(block_quant=self.config.use_block_quant_rollout)
+        if self.config.quantization is not None:
+            if self.config.quantization == "fp8":
+                # Apply vllm fp8 patches
+                # Will remove the patch after vllm support on-the-fly quant for rollout natively.
+                apply_vllm_fp8_patches()
+            else:
+                raise ValueError(f"Currently only support fp8 quantization, got: {self.config.quantization}")
         self.inference_engine = WorkerWrapperBase(vllm_config=self.vllm_config)
         self.inference_engine.init_worker(all_kwargs)
 
@@ -726,12 +732,12 @@ class vLLMAsyncRollout(BaseRollout):
             # Add the FP8 related logic here as sharding manager has been deprecated.
             # Check if FP8 quantization is enabled and apply appropriate weight loading
             if is_fp8_model(model_runner.vllm_config):
-                logger.info(f"FP8 model detected: {model_runner.vllm_config.quant_config}")
+                logger.info(f"FP8 model detected (async): {model_runner.vllm_config.quant_config}")
                 # Convert bf16 weights to fp8 format before loading
                 loaded_params = load_quanted_weights(weights, model_runner)
-                logger.info(f"FP8 weights loaded, loaded_params: {len(loaded_params)}")
+                logger.info(f"FP8 weights loaded (async), loaded_params: {len(loaded_params)}")
             else:
-                logger.debug("Loading standard weights (non-FP8)")
+                logger.info("Loading standard weights (non-FP8, async)")
                 model.load_weights(weights)
 
     def generate_sequences(self, prompts: DataProto) -> DataProto:
